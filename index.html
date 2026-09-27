@@ -1,5 +1,6 @@
 <!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>Dalva Atrasos · Leitor</title><style>
 *{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#10223a;font:17px Arial,sans-serif}header{background:linear-gradient(135deg,#073b6f,#0b5c96);color:white;padding:20px}header h1{font-size:20px;margin:0}header p{font-size:14px;margin:8px 0 0}main{max-width:720px;margin:auto;padding:12px}.modes{display:grid;grid-template-columns:1fr 1fr;gap:12px}button{font:inherit;min-height:54px;border:1px solid #bfd0dd;border-radius:12px;background:white;color:#073b6f;padding:14px;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.active{background:#073b6f;color:white}.camera{position:relative;margin:14px 0;background:#122234;border-radius:18px;overflow:hidden;aspect-ratio:4/3}video{width:100%;height:100%;object-fit:cover}.guide{position:absolute;inset:16%;border:3px solid #fff9;border-radius:15px;pointer-events:none}.status{padding:20px;border-radius:14px;background:white;text-align:center;font-weight:700;min-height:85px;display:grid;place-items:center}.ok{background:#dff6e8;color:#17663e}.warn{background:#fff0c5;color:#755100}.bad{background:#ffe5e2;color:#94251b}#actions{display:grid;gap:8px;margin-top:10px}.tools{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.tools button{flex:1;font-size:14px}iframe{position:absolute;width:1px;height:1px;border:0;left:-10px}small{display:block;text-align:center;color:#526779;margin:16px 0;font-size:12px}@media(max-width:480px){header{padding:16px}.camera{aspect-ratio:1/1}main{padding:10px}}
+#actions label{font-weight:700;margin-top:8px}#actions select,#actions textarea{width:100%;font:inherit;padding:13px;border:1px solid #bfd0dd;border-radius:10px;background:#fff;color:#10223a}#actions textarea{min-height:100px;resize:vertical}#actions [hidden]{display:none!important}
 </style></head><body><header><h1>E.M. Profª Dalva Dati Ruivo</h1><p>Dalva Atrasos · Registro de atrasos</p></header><main><div class="camera"><video id="video" autoplay muted playsinline></video><div class="guide"></div></div><div id="status" class="status" role="status" aria-live="polite">Conectando…</div><div id="actions"></div><div class="tools"><button id="start">Iniciar câmera</button><button id="switch">Trocar câmera</button><button id="forget">Desvincular aparelho</button></div><small>Posicione uma carteirinha por vez. Afaste o QR após a leitura.</small></main><script src="jsQR.js"></script><script>
 'use strict';
 // ÚNICA CONFIGURAÇÃO PÚBLICA: URL /exec da NOVA implantação do Dalva Atrasos.
@@ -19,11 +20,35 @@ function submit(action=''){
  if(!pending||!bridge)return;
  pending.action=action;buttons([]);say('Processando…');
  bridge.postMessage({type:'SCAN',channel,payload:pending},bridgeOrigin);
- clearTimeout(timer);timer=setTimeout(()=>{say('Resposta não recebida. Confira o mesmo registro.','warn');buttons([['Consultar novamente',()=>submit(pending.action)],['Interromper leitura',reset]]);},30000);
+ clearTimeout(timer);timer=setTimeout(()=>{if(pending.action==='SALVAR_MOTIVO'){say('O atraso já foi registrado. Não foi possível confirmar o motivo.','warn');buttons([['Tentar salvar novamente',()=>submit('SALVAR_MOTIVO')]]);}else{say('Resposta não recebida. Confira o mesmo registro.','warn');buttons([['Consultar novamente',()=>submit(pending.action)],['Interromper leitura',reset]]);}},30000);
 }
 const texts={SEM_ATRASO:'Horário dentro do limite do turno. Nenhum atraso registrado.',ALUNO_NAO_LOCALIZADO:'Aluno não localizado. Procure a secretaria.',PERIODO_INVALIDO:'Período do aluno não identificado. Procure a secretaria.',REQUISICAO_INVALIDA:'Leitura incompatível com este sistema.',TOKEN_INVALIDO:'QR inválido ou credencial inexistente.',CARTEIRINHA_PERDIDA:'Carteirinha perdida. Acesso bloqueado.',CARTEIRINHA_SUBSTITUIDA:'Carteirinha substituída. Acesso bloqueado.',CARTEIRINHA_INATIVADA:'Carteirinha inativada. Procure a secretaria.',APARELHO_NAO_AUTORIZADO:'Aparelho não habilitado. Solicite um novo link à gestão.',FALHA_VERIFICAR:'Não foi possível confirmar o resultado. Consulte novamente.',OCUPADO:'Sistema ocupado. Consulte novamente.'};
+const motivosAtraso=["Atraso no transporte escolar", "Atraso no transporte público", "Trânsito / dificuldade no trajeto", "Acordou tarde / perdeu o horário", "Imprevisto familiar", "Consulta ou atendimento de saúde", "Mal-estar", "Chuva / alagamento", "Esqueceu material ou documento e precisou voltar", "Motivo não informado", "Outros"];
+function pedirMotivo(message='Atraso registrado. Informe o motivo.'){
+ clearTimeout(timer);buttons([]);say(message,'ok');
+ const label=document.createElement('label');label.htmlFor='motivo';label.textContent='Motivo do atraso';
+ const select=document.createElement('select');select.id='motivo';select.required=true;
+ const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Selecione o motivo';placeholder.disabled=true;placeholder.selected=true;select.appendChild(placeholder);
+ motivosAtraso.forEach(v=>{const option=document.createElement('option');option.value=v;option.textContent=v;select.appendChild(option);});
+ const otherLabel=document.createElement('label');otherLabel.htmlFor='outroMotivo';otherLabel.textContent='Descreva o motivo';
+ const other=document.createElement('textarea');other.id='outroMotivo';other.maxLength=500;other.placeholder='Digite o motivo do atraso';
+ const save=document.createElement('button');save.textContent='Confirmar motivo';save.className='active';
+ if(pending.motivo)select.value=pending.motivo;other.value=pending.outroMotivo||'';
+ function update(){const isOther=select.value==='Outros';otherLabel.hidden=other.hidden=!isOther;other.required=isOther;save.disabled=!select.value||(isOther&&!other.value.trim());}
+ select.onchange=()=>{update();if(select.value==='Outros')other.focus();};other.oninput=update;
+ save.onclick=()=>{if(!select.value||(select.value==='Outros'&&!other.value.trim()))return;pending.motivo=select.value;pending.outroMotivo=select.value==='Outros'?other.value.trim():'';submit('SALVAR_MOTIVO');};
+ actions.append(label,select,otherLabel,other,save);update();status.scrollIntoView({block:'start',behavior:'smooth'});
+}
 function handle(r){
+ if(pending&&pending.reasonStage&&r.ok&&r.code==='ATRASO')return;
+
  clearTimeout(timer);
+ if(pending.action==='SALVAR_MOTIVO'){
+  if(r.ok&&r.code==='MOTIVO_SALVO'){say('Atraso e motivo registrados.','ok');buttons([]);timer=setTimeout(reset,1400);return;}
+  if(r.code==='MOTIVO_INVALIDO'){pedirMotivo('Confira o motivo e preencha a descrição de Outros (até 500 caracteres).');return;}
+  say('O atraso já foi registrado. '+(texts[r.code]||'Não foi possível salvar o motivo. Tente novamente.'),'warn');buttons([['Tentar salvar novamente',()=>submit('SALVAR_MOTIVO')]]);return;
+ }
+ if(r.ok&&r.code==='ATRASO'&&!r.motivoSalvo){pending.reasonStage=true;pedirMotivo();return;}
  if(['FALHA_VERIFICAR','OCUPADO'].includes(r.code)){say(texts[r.code],'warn');buttons([['Consultar novamente',()=>submit(pending.action)],['Cancelar',reset]]);return;}
  say((r.testMode?'TESTE · ':'')+(r.ok?'Registrado · '+r.code:texts[r.code]||'Registro não autorizado.'),r.ok?'ok':r.code==='SEM_ATRASO'?'warn':'bad');
  timer=setTimeout(reset,r.ok?1400:2800);
